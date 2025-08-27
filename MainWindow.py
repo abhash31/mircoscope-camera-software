@@ -9,13 +9,13 @@ from PyQt5.QtWidgets import (
     QMessageBox, QScrollArea,
     QWidget, QVBoxLayout,
     QLabel, QPushButton, QSlider, QHBoxLayout, QSpinBox,
-    QCheckBox, QGroupBox, QComboBox
+    QCheckBox, QGroupBox, QComboBox, QStackedLayout
 )
 from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import Qt
 from CameraWorker import CameraWorkerThread
 from RulerLabel import RulerLabel
-from ui.create_measurement_panel import create_measurement_panel
+from ui.histogram_panel import histogram_panel
 from ui.menu_bar import menu_bar
 
 
@@ -28,7 +28,6 @@ class MainWindow(QMainWindow):
         self.camera_active = False
         self.recording = False
         self.setWindowTitle("Microscope Camera Software")
-
         self.brightness_value = 50
         self.contrast_value = 50
         self.exposure_value = 50
@@ -41,20 +40,29 @@ class MainWindow(QMainWindow):
 
         menu_bar(self) # create menu bar
 
-        # self.center_q_label = QLabel()
-        # self.center_q_label.setAlignment(Qt.AlignCenter)
-        # self.center_q_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-        # self.center_q_label.setScaledContents(False)
-
         self.central_label = RulerLabel()
         self.central_label.setAlignment(Qt.AlignCenter)
         self.central_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.central_label.setScaledContents(False)
-        # self.central_label.setFixedHeight(20)
+
+        self.logo_label = QLabel()
+        self.logo_label.setAlignment(Qt.AlignCenter)
+        self.logo_label.setPixmap(QPixmap("assets/logo.png").scaled(
+            350, 350, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        ))
+        self.logo_label.setScaledContents(False)  # keep aspect
+
+        # Stack them
+        stack = QWidget()
+        self.stack_layout = QStackedLayout(stack)
+        self.stack_layout.addWidget(self.logo_label)  # background
+        self.stack_layout.addWidget(self.central_label)  # foreground
+
+        self.stack_layout.setCurrentWidget(self.logo_label)
 
         self.scroll_area = QScrollArea()
-        self.scroll_area.setWidget(self.central_label)
-        self.scroll_area.setWidgetResizable(False)  # ← important!
+        self.scroll_area.setWidget(stack)
+        self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setAlignment(Qt.AlignCenter)
 
         # Central camera display with ruler capabilities
@@ -108,10 +116,16 @@ class MainWindow(QMainWindow):
         central_container = QWidget()
         layout = QVBoxLayout()
 
+        # Histogram Label (for bottom display)
+        # self.histogram_label = QLabel()
+        # self.histogram_label.setAlignment(Qt.AlignCenter)
+        # self.histogram_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        # self.histogram_label.setFixedHeight(100)  # Adjust height for histogram display
 
         layout.addWidget(self.top_toolbox)  # top toolbox
-        layout.addWidget(self.fixed_ruler_label)
+        # layout.addWidget(self.fixed_ruler_label)
         layout.addWidget(self.scroll_area)  # main content
+        # layout.addWidget(self.histogram_label)
 
         central_container.setLayout(layout)
         self.setCentralWidget(central_container)
@@ -127,7 +141,7 @@ class MainWindow(QMainWindow):
         # create_properties_panel(self)
         self.record_button = self.create_properties_panel()
         self.record_button.setText("Start Record")
-        create_measurement_panel(self)
+        histogram_panel(self)
         self.toolbox.addItem(self.create_section("Advanced"), "Advanced")
 
         # Dock widget setup
@@ -151,11 +165,53 @@ class MainWindow(QMainWindow):
 
         self.scroll_area.verticalScrollBar().valueChanged.connect(self.update_ruler_position)
 
+    def update_histogram(self):
+        """Update the histogram and display it in the toolbox (and bottom label if present)."""
+        if self.latest_frame is None:
+            return
+
+        # Convert QImage -> numpy RGB
+        cv_image = self.latest_frame.convertToFormat(QImage.Format_RGB888)
+        ptr = cv_image.bits()
+        ptr.setsize(cv_image.byteCount())
+        img = np.array(ptr, dtype=np.uint8).reshape(cv_image.height(), cv_image.width(), 3)
+
+        # Draw hist image (H=200, W=256)
+        H, W = 200, 256
+        hist_img = np.zeros((H, W, 3), dtype=np.uint8)
+
+        # Channels in img are RGB (0=R,1=G,2=B). Choose colors to draw in RGB space.
+        channel_info = [
+            (0, (255, 0, 0)),  # R channel drawn in red
+            (1, (0, 255, 0)),  # G channel drawn in green
+            (2, (0, 0, 255)),  # B channel drawn in blue
+        ]
+
+        for ch, color in channel_info:
+            hist = cv2.calcHist([img], [ch], None, [256], [0, 256])
+            cv2.normalize(hist, hist, 0, H - 1, cv2.NORM_MINMAX)
+            hist = hist.flatten().astype(int)
+            for x in range(1, 256):
+                cv2.line(hist_img,
+                         (x - 1, H - 1 - hist[x - 1]),
+                         (x, H - 1 - hist[x]),
+                         color, 1)
+
+        # Convert numpy -> QPixmap (copy so QImage owns its data)
+        qimg = QImage(hist_img.data, W, H, 3 * W, QImage.Format_RGB888).copy()
+        pm = QPixmap.fromImage(qimg)
+
+        # Show in toolbox panel
+        if hasattr(self, "histogram_panel_label"):
+            self.histogram_panel_label.setPixmap(pm)
+
+        # If you also bring back the bottom histogram label:
+        if hasattr(self, "histogram_label"):
+            self.histogram_label.setPixmap(pm)
+
     def update_ruler_position(self):
-        """Update the ruler position based on the scroll position of the image."""
         scroll_pos = self.scroll_area.verticalScrollBar().value()
 
-        # Set the ruler position based on the scroll position
         self.fixed_ruler_label.move(0, scroll_pos)  # Keep the ruler aligned with the scroll
 
     def setup_top_toolbox_panel(self):
@@ -241,6 +297,8 @@ class MainWindow(QMainWindow):
                 self.on_zoom_percent_changed(self.zoom_slider.value())
                 self.toggle_controls(True)
                 self.update_zoom_factor_for_ruler()
+                self.update_histogram()
+                self.stack_layout.setCurrentWidget(self.central_label)
             else:
                 QMessageBox.warning(self, "Error", "Could not load the selected image.")
 
@@ -253,7 +311,6 @@ class MainWindow(QMainWindow):
             self.awb_checkbox, self.grayscale_checkbox,
             self.zoom_slider, self.zoom_spinbox,
             self.format_combo,
-            self.clear_rulers_button
         ]
         for w in controls:
             w.setEnabled(enable)
@@ -333,6 +390,7 @@ class MainWindow(QMainWindow):
 
         # 🔥 Apply zoom after updating image
         self.on_zoom_percent_changed(self.zoom_slider.value())
+        self.update_histogram()
 
     def update_awb_checkbox(self, state):
         if self.camera:
@@ -444,6 +502,8 @@ class MainWindow(QMainWindow):
             self.line_button.setChecked(False)
             self.circle_button.setChecked(False)
             self.angle_button.setChecked(False)
+            self.update_histogram()
+            self.stack_layout.setCurrentWidget(self.central_label)
             # self.start_recording()  # Start recording when camera starts
         else:
             self.stop_camera()
@@ -512,6 +572,7 @@ class MainWindow(QMainWindow):
         self.central_label.setPixmap(QPixmap.fromImage(scaled_image))
         self.central_label.resize(new_width, new_height)
         self.central_label.set_zoom_factor(scale_factor)
+        self.update_histogram()
 
     def closeEvent(self, event):
         """Clean up when closing application"""
