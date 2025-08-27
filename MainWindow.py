@@ -9,15 +9,14 @@ from PyQt5.QtWidgets import (
     QMessageBox, QScrollArea,
     QWidget, QVBoxLayout,
     QLabel, QPushButton, QSlider, QHBoxLayout, QSpinBox,
-    QCheckBox, QGroupBox, QComboBox
+    QCheckBox, QGroupBox, QComboBox, QStackedLayout
 )
 from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QSize
 from CameraWorker import CameraWorkerThread
 from RulerLabel import RulerLabel
-from ui.create_measurement_panel import create_measurement_panel
+from ui.histogram_panel import histogram_panel
 from ui.menu_bar import menu_bar
-
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -28,7 +27,6 @@ class MainWindow(QMainWindow):
         self.camera_active = False
         self.recording = False
         self.setWindowTitle("Microscope Camera Software")
-
         self.brightness_value = 50
         self.contrast_value = 50
         self.exposure_value = 50
@@ -41,20 +39,29 @@ class MainWindow(QMainWindow):
 
         menu_bar(self) # create menu bar
 
-        # self.center_q_label = QLabel()
-        # self.center_q_label.setAlignment(Qt.AlignCenter)
-        # self.center_q_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-        # self.center_q_label.setScaledContents(False)
-
         self.central_label = RulerLabel()
         self.central_label.setAlignment(Qt.AlignCenter)
         self.central_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.central_label.setScaledContents(False)
-        # self.central_label.setFixedHeight(20)
+
+        self.logo_label = QLabel()
+        self.logo_label.setAlignment(Qt.AlignCenter)
+        self.logo_label.setPixmap(QPixmap("assets/logo.png").scaled(
+            350, 350, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        ))
+        self.logo_label.setScaledContents(False)  # keep aspect
+
+        # Stack them
+        stack = QWidget()
+        self.stack_layout = QStackedLayout(stack)
+        self.stack_layout.addWidget(self.logo_label)  # background
+        self.stack_layout.addWidget(self.central_label)  # foreground
+
+        self.stack_layout.setCurrentWidget(self.logo_label)
 
         self.scroll_area = QScrollArea()
-        self.scroll_area.setWidget(self.central_label)
-        self.scroll_area.setWidgetResizable(False)  # ← important!
+        self.scroll_area.setWidget(stack)
+        self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setAlignment(Qt.AlignCenter)
 
         # Central camera display with ruler capabilities
@@ -63,23 +70,54 @@ class MainWindow(QMainWindow):
         self.fixed_ruler_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.fixed_ruler_label.setFixedHeight(20)
 
-        # Top QToolBox Panel (hidden by default)
-        # TODO: fix layout
         # Create the toolbox
         self.top_toolbox = QToolBox()
         self.top_toolbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.top_toolbox.setMaximumHeight(150)
-        self.top_toolbox.setVisible(False)  # hidden initially
+        self.top_toolbox.setVisible(True)  # hidden initially
 
         # Create the panel widget and layout
         panel_widget = QWidget()
         panel_layout = QHBoxLayout()
 
         # Add a label
-        panel_layout.addWidget(QLabel("Measurement Control"))
+        # panel_layout.addWidget(QLabel("Control"))
+
+        # self.start_camera = QPushButton()
+        # self.start_camera.setIcon(QIcon("assets/camera.svg"))
+        # self.start_camera.setCheckable(True)
+        # self.start_camera.setChecked(False)
+        #
+        # self.snap_btn = QPushButton()
+        # self.snap_btn.setIcon(QIcon("assets/disk.svg"))
+        # self.snap_btn.setCheckable(True)
+        # self.snap_btn.setChecked(False)
+        #
+        # self.record_btn = QPushButton()
+        # self.record_btn.setIcon(QIcon("assets/dot-circle_inactive.svg"))
+        # self.record_btn.setCheckable(True)
+        # self.record_btn.setIconSize(QSize(30,30))
+        # self.record_btn.setChecked(False)
+        # self.record_btn.setStyleSheet("""
+        #     QPushButton {
+        #         border: none;
+        #         background: transparent;
+        #         box-shadow: none;
+        #     }
+        #     QPushButton:checked {
+        #         background: blue;
+        #     }
+        #     QPushButton:hover {
+        #         background: transparent;
+        #     }
+        #     QPushButton:pressed {
+        #         background: transparent;
+        #     }
+        # """)
 
         # Add buttons
-        self.line_button = QPushButton("Line")
+        self.line_button = QPushButton()
+        self.line_button.setIcon(QIcon("assets/camera.svg"))
         self.line_button.setFixedSize(120, 30)
         self.line_button.setCheckable(True)
         self.line_button.setChecked(False)
@@ -97,9 +135,14 @@ class MainWindow(QMainWindow):
         self.angle_button.setChecked(False)
         self.angle_button.clicked.connect(self.toggle_angle_tool)
 
+        # panel_layout.addWidget(self.start_camera)
+        # panel_layout.addWidget(self.snap_btn)
+        # panel_layout.addWidget(self.record_btn)
         panel_layout.addWidget(self.line_button)
         panel_layout.addWidget(self.circle_button)
         panel_layout.addWidget(self.angle_button)
+
+        # panel_layout.addWidget(self.start_camera)
 
         # Finalize layout
         panel_widget.setLayout(panel_layout)
@@ -108,9 +151,7 @@ class MainWindow(QMainWindow):
         central_container = QWidget()
         layout = QVBoxLayout()
 
-
-        layout.addWidget(self.top_toolbox)  # top toolbox
-        layout.addWidget(self.fixed_ruler_label)
+        layout.addWidget(panel_widget)  # top toolbox
         layout.addWidget(self.scroll_area)  # main content
 
         central_container.setLayout(layout)
@@ -122,12 +163,11 @@ class MainWindow(QMainWindow):
         self.toolbox = QToolBox()
         self.toolbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-
         # Create control panels
         # create_properties_panel(self)
         self.record_button = self.create_properties_panel()
         self.record_button.setText("Start Record")
-        create_measurement_panel(self)
+        histogram_panel(self)
         self.toolbox.addItem(self.create_section("Advanced"), "Advanced")
 
         # Dock widget setup
@@ -151,11 +191,53 @@ class MainWindow(QMainWindow):
 
         self.scroll_area.verticalScrollBar().valueChanged.connect(self.update_ruler_position)
 
+    def update_histogram(self):
+        """Update the histogram and display it in the toolbox (and bottom label if present)."""
+        if self.latest_frame is None:
+            return
+
+        # Convert QImage -> numpy RGB
+        cv_image = self.latest_frame.convertToFormat(QImage.Format_RGB888)
+        ptr = cv_image.bits()
+        ptr.setsize(cv_image.byteCount())
+        img = np.array(ptr, dtype=np.uint8).reshape(cv_image.height(), cv_image.width(), 3)
+
+        # Draw hist image (H=200, W=256)
+        H, W = 200, 256
+        hist_img = np.zeros((H, W, 3), dtype=np.uint8)
+
+        # Channels in img are RGB (0=R,1=G,2=B). Choose colors to draw in RGB space.
+        channel_info = [
+            (0, (255, 0, 0)),  # R channel drawn in red
+            (1, (0, 255, 0)),  # G channel drawn in green
+            (2, (0, 0, 255)),  # B channel drawn in blue
+        ]
+
+        for ch, color in channel_info:
+            hist = cv2.calcHist([img], [ch], None, [256], [0, 256])
+            cv2.normalize(hist, hist, 0, H - 1, cv2.NORM_MINMAX)
+            hist = hist.flatten().astype(int)
+            for x in range(1, 256):
+                cv2.line(hist_img,
+                         (x - 1, H - 1 - hist[x - 1]),
+                         (x, H - 1 - hist[x]),
+                         color, 1)
+
+        # Convert numpy -> QPixmap (copy so QImage owns its data)
+        qimg = QImage(hist_img.data, W, H, 3 * W, QImage.Format_RGB888).copy()
+        pm = QPixmap.fromImage(qimg)
+
+        # Show in toolbox panel
+        if hasattr(self, "histogram_panel_label"):
+            self.histogram_panel_label.setPixmap(pm)
+
+        # If you also bring back the bottom histogram label:
+        if hasattr(self, "histogram_label"):
+            self.histogram_label.setPixmap(pm)
+
     def update_ruler_position(self):
-        """Update the ruler position based on the scroll position of the image."""
         scroll_pos = self.scroll_area.verticalScrollBar().value()
 
-        # Set the ruler position based on the scroll position
         self.fixed_ruler_label.move(0, scroll_pos)  # Keep the ruler aligned with the scroll
 
     def setup_top_toolbox_panel(self):
@@ -241,6 +323,8 @@ class MainWindow(QMainWindow):
                 self.on_zoom_percent_changed(self.zoom_slider.value())
                 self.toggle_controls(True)
                 self.update_zoom_factor_for_ruler()
+                self.update_histogram()
+                self.stack_layout.setCurrentWidget(self.central_label)
             else:
                 QMessageBox.warning(self, "Error", "Could not load the selected image.")
 
@@ -253,7 +337,6 @@ class MainWindow(QMainWindow):
             self.awb_checkbox, self.grayscale_checkbox,
             self.zoom_slider, self.zoom_spinbox,
             self.format_combo,
-            self.clear_rulers_button
         ]
         for w in controls:
             w.setEnabled(enable)
@@ -333,6 +416,7 @@ class MainWindow(QMainWindow):
 
         # 🔥 Apply zoom after updating image
         self.on_zoom_percent_changed(self.zoom_slider.value())
+        self.update_histogram()
 
     def update_awb_checkbox(self, state):
         if self.camera:
@@ -377,8 +461,6 @@ class MainWindow(QMainWindow):
     def clear_all_rulers(self):
         self.central_label.clear_rulers()
 
-
-
     def save_current_frame(self):
         if self.latest_frame is None:
             QMessageBox.warning(self, "Warning", "No frame to save!")
@@ -402,28 +484,6 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Error", "Failed to save overlay!")
         else:
             QMessageBox.warning(self, "Error", f"Unsupported format: {file_format}")
-        # image = self.latest_frame.convertToFormat(QImage.Format_RGB888)
-        # width = image.width()
-        # height = image.height()
-        # ptr = image.bits()
-        # ptr.setsize(image.byteCount())
-        # img_data = np.array(ptr, dtype=np.uint8).reshape((height, width, 3))
-        #
-        # img_data_bgr = cv2.cvtColor(img_data, cv2.COLOR_RGB2BGR)
-        #
-        # # Generate timestamp filename
-        # timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        # file_format = self.format_combo.currentText().lower()
-        # filename = f"frame_{timestamp}.{file_format}"
-        # filepath = os.path.join(self.output_dir, filename)
-        #
-        # if file_format in ("png", "jpg", "jpeg", "bmp"):
-        #     if cv2.imwrite(filepath, img_data_bgr):
-        #         QMessageBox.information(self, "Success", f"Frame saved as:\n{filepath}")
-        #     else:
-        #         QMessageBox.warning(self, "Error", "Failed to save frame!")
-        # else:
-        #     QMessageBox.warning(self, "Error", f"Unsupported file format: {file_format}")
 
     def start_stop_camera_feed(self):
         if not self.camera_active:
@@ -444,6 +504,8 @@ class MainWindow(QMainWindow):
             self.line_button.setChecked(False)
             self.circle_button.setChecked(False)
             self.angle_button.setChecked(False)
+            self.update_histogram()
+            self.stack_layout.setCurrentWidget(self.central_label)
             # self.start_recording()  # Start recording when camera starts
         else:
             self.stop_camera()
@@ -512,6 +574,7 @@ class MainWindow(QMainWindow):
         self.central_label.setPixmap(QPixmap.fromImage(scaled_image))
         self.central_label.resize(new_width, new_height)
         self.central_label.set_zoom_factor(scale_factor)
+        self.update_histogram()
 
     def closeEvent(self, event):
         """Clean up when closing application"""
@@ -611,6 +674,7 @@ class MainWindow(QMainWindow):
 
         # Update the ruler zoom factor (this will affect tick spacing)
         self.fixed_ruler_label.set_zoom_factor(scale)
+
     def create_properties_panel(self):
         """Create the main properties panel with camera controls"""
         properties_widget = QWidget()
@@ -642,6 +706,28 @@ class MainWindow(QMainWindow):
         self.slider.setValue(50)
         self.brightness_value = 50
         self.slider.valueChanged.connect(self.update_brightness)
+        self.slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                background: #4CAF50;  # Track color (green)
+                height: 6px;          # Height of the track
+                border-radius: 3px;   # Rounded corners for the track
+            }
+            QSlider::handle:horizontal {
+                background: #FF5733;  # Handle color (orange)
+                border: 2px solid #FF5733;  # Border around the handle
+                width: 12px;          # Handle width
+                height: 12px;         # Handle height
+                border-radius: 6px;   # Rounded handle
+            }
+            QSlider::sub-page:horizontal {
+                background: #76D7C4;  # Subtrack color (light green)
+                border-radius: 3px;
+            }
+            QSlider::add-page:horizontal {
+                background: #D3D3D3;  # Remaining track color (gray)
+                border-radius: 3px;
+            }
+        """)
 
         self.brightness_spinbox = QSpinBox()
         self.brightness_spinbox.setRange(0, 100)

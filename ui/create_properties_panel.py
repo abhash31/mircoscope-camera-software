@@ -150,6 +150,6 @@ def create_properties_panel(self):
     properties_layout.addStretch()
     properties_widget.setLayout(properties_layout)
 
-    self.toolbox.addItem(properties_widget, "Properties")
+    self.left_toolbox.addItem(properties_widget, "Properties")
 
     return self.record_button
