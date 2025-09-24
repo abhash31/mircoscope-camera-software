@@ -25,7 +25,7 @@ def menu_bar(self):
     self.ruler_action = tools_menu.addAction("Enable Measurement Tool")
     self.ruler_action.setCheckable(True)
     self.ruler_action.triggered.connect(self.toggle_ruler_from_menu)
-    self.ruler_action.triggered.connect(self.toggle_top_toolbox)
+    # self.ruler_action.triggered.connect(self.toggle_top_toolbox)
     self.ruler_action.setShortcut("Ctrl+M")
 
     clear_rulers_action = tools_menu.addAction("Clear All Measurements")

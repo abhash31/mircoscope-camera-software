@@ -2,26 +2,32 @@ import cv2
 import datetime
 import os
 import numpy as np
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtGui import QImage, QPixmap, QPainter
+from PyQt5.QtMultimedia import QCameraInfo
+from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
 from PyQt5.QtWidgets import (
     QMainWindow, QToolBox, QDockWidget,
     QSizePolicy, QFileDialog,
     QMessageBox, QScrollArea,
     QWidget, QVBoxLayout,
     QLabel, QPushButton, QSlider, QHBoxLayout, QSpinBox,
-    QCheckBox, QGroupBox, QComboBox, QStackedLayout
+    QCheckBox, QGroupBox, QComboBox, QStackedLayout, QToolButton, QLayoutItem, QToolBar, QListWidget, QStyle, QLineEdit
 )
 from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtCore import Qt, QSize, QRect
 from CameraWorker import CameraWorkerThread
 from RulerLabel import RulerLabel
+from utils.style_sheet import active_colors, inactive_colors
+from v_line import VLine
 from ui.histogram_panel import histogram_panel
 from ui.menu_bar import menu_bar
+
+W = 10
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.camera = None
+        self.camera = CameraWorkerThread()
         self.latest_frame = None
         self.current_image_path = None
         self.camera_active = False
@@ -30,7 +36,7 @@ class MainWindow(QMainWindow):
         self.brightness_value = 50
         self.contrast_value = 50
         self.exposure_value = 50
-        self.zoom_value = 10
+        self.zoom_value = 2
 
         # Create output directory
         self.output_dir = "saved_frames"
@@ -45,11 +51,16 @@ class MainWindow(QMainWindow):
         self.central_label.setScaledContents(False)
 
         self.logo_label = QLabel()
+
+        svg_renderer = QSvgRenderer("assets/logo.svg")
+        pixmap = QPixmap(400, 200)
+        pixmap.fill(Qt.transparent)  # Transparent background
+        painter = QPainter(pixmap)
+        svg_renderer.render(painter)
+        painter.end()
+
+        self.logo_label.setPixmap(pixmap)
         self.logo_label.setAlignment(Qt.AlignCenter)
-        self.logo_label.setPixmap(QPixmap("assets/logo.png").scaled(
-            350, 350, Qt.KeepAspectRatio, Qt.SmoothTransformation
-        ))
-        self.logo_label.setScaledContents(False)  # keep aspect
 
         # Stack them
         stack = QWidget()
@@ -68,91 +79,94 @@ class MainWindow(QMainWindow):
         self.fixed_ruler_label = RulerLabel()  # Fixed ruler
         self.fixed_ruler_label.setAlignment(Qt.AlignCenter)
         self.fixed_ruler_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.fixed_ruler_label.setFixedHeight(20)
+        self.fixed_ruler_label.setFixedHeight(W)
 
         # Create the toolbox
         self.top_toolbox = QToolBox()
         self.top_toolbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.top_toolbox.setMaximumHeight(150)
-        self.top_toolbox.setVisible(True)  # hidden initially
+        self.top_toolbox.setMaximumHeight(200)
+        self.top_toolbox.setVisible(False)  # hidden initially
 
-        # Create the panel widget and layout
-        panel_widget = QWidget()
-        panel_layout = QHBoxLayout()
+        panel_layout = QToolBar()
+        panel_layout.setMovable(False)
+        panel_layout.setIconSize(QSize(23, 23))
 
-        # Add a label
-        # panel_layout.addWidget(QLabel("Control"))
+        self.start_camera = QToolButton()
+        self.start_camera.setIcon(QIcon("assets/video_inactive.svg"))
+        self.start_camera.setIconSize(QSize(W, W))
+        self.start_camera.setText("Start")
+        self.start_camera.setCheckable(True)
+        self.start_camera.clicked.connect(self.start_stop_camera_feed)
 
-        # self.start_camera = QPushButton()
-        # self.start_camera.setIcon(QIcon("assets/camera.svg"))
-        # self.start_camera.setCheckable(True)
-        # self.start_camera.setChecked(False)
-        #
-        # self.snap_btn = QPushButton()
-        # self.snap_btn.setIcon(QIcon("assets/disk.svg"))
-        # self.snap_btn.setCheckable(True)
-        # self.snap_btn.setChecked(False)
-        #
-        # self.record_btn = QPushButton()
-        # self.record_btn.setIcon(QIcon("assets/dot-circle_inactive.svg"))
-        # self.record_btn.setCheckable(True)
-        # self.record_btn.setIconSize(QSize(30,30))
-        # self.record_btn.setChecked(False)
-        # self.record_btn.setStyleSheet("""
-        #     QPushButton {
-        #         border: none;
-        #         background: transparent;
-        #         box-shadow: none;
-        #     }
-        #     QPushButton:checked {
-        #         background: blue;
-        #     }
-        #     QPushButton:hover {
-        #         background: transparent;
-        #     }
-        #     QPushButton:pressed {
-        #         background: transparent;
-        #     }
-        # """)
+        self.camera_snap = QToolButton()
+        self.camera_snap.setIcon(QIcon("assets/camera_inactive.svg"))
+        self.camera_snap.setIconSize(QSize(W, W))
+        self.camera_snap.setText("Snapshot")
+        self.camera_snap.setCheckable(True)
+        self.camera_snap.clicked.connect(self.save_current_frame)
+
+        self.record_btn = QToolButton()
+        self.record_btn.setIcon(QIcon("assets/record_inactive.svg"))
+        self.record_btn.setIconSize(QSize(W, W))
+        self.record_btn.setText("Record")
+        self.record_btn.setCheckable(True)
+        self.record_btn.clicked.connect(self.start_recording)
+
+        self.stop_record_btn = QToolButton()
+        self.stop_record_btn.setIcon(QIcon("assets/record_stop_inactive.svg"))
+        self.stop_record_btn.setIconSize(QSize(W, W))
+        self.stop_record_btn.setText("Stop-Record")
+        self.stop_record_btn.setCheckable(True)
+        self.stop_record_btn.clicked.connect(self.stop_recording)
 
         # Add buttons
-        self.line_button = QPushButton()
-        self.line_button.setIcon(QIcon("assets/camera.svg"))
-        self.line_button.setFixedSize(120, 30)
+        self.line_button = QToolButton()
+        self.line_button.setIcon(QIcon("assets/line_inactive.svg"))
+        self.line_button.setIconSize(QSize(W, W))
+        self.line_button.setText("Line")
         self.line_button.setCheckable(True)
-        self.line_button.setChecked(False)
         self.line_button.clicked.connect(self.toggle_line_tool)
 
-        self.circle_button = QPushButton("Circle")
-        self.circle_button.setFixedSize(120, 30)
+        self.circle_button = QToolButton()
+        self.circle_button.setIcon(QIcon("assets/circle_inactive.svg"))
+        self.circle_button.setIconSize(QSize(W, W))
+        self.circle_button.setText("Circle")
         self.circle_button.setCheckable(True)
-        self.circle_button.setChecked(False)
         self.circle_button.clicked.connect(self.toggle_circle_tool)
 
-        self.angle_button = QPushButton("Angle")
-        self.angle_button.setFixedSize(120, 30)
+        self.angle_button = QToolButton()
+        self.angle_button.setIcon(QIcon("assets/angle_inactive.svg"))
+        self.angle_button.setIconSize(QSize(W, W))
+        self.angle_button.setText("Angle")
         self.angle_button.setCheckable(True)
-        self.angle_button.setChecked(False)
         self.angle_button.clicked.connect(self.toggle_angle_tool)
 
-        # panel_layout.addWidget(self.start_camera)
-        # panel_layout.addWidget(self.snap_btn)
-        # panel_layout.addWidget(self.record_btn)
+        self.zoom_in = QToolButton()
+        self.zoom_in.setIcon(QIcon("assets/zoom_in.svg"))
+        self.zoom_in.setIconSize(QSize(W, W))
+        self.zoom_in.setText("Zoom in")
+        self.zoom_in.clicked.connect(self.zoom_in_camera)
+
+        self.zoom_out = QToolButton()
+        self.zoom_out.setIcon(QIcon("assets/zoom_out.svg"))
+        self.zoom_out.setIconSize(QSize(W, W))
+        self.zoom_out.setText("Zoom out")
+        self.zoom_out.clicked.connect(self.zoom_out_camera)
+
+        panel_layout.addWidget(self.start_camera)
+        panel_layout.addWidget(self.camera_snap)
+        panel_layout.addWidget(self.record_btn)
+        panel_layout.addWidget(self.stop_record_btn)
         panel_layout.addWidget(self.line_button)
         panel_layout.addWidget(self.circle_button)
         panel_layout.addWidget(self.angle_button)
-
-        # panel_layout.addWidget(self.start_camera)
-
-        # Finalize layout
-        panel_widget.setLayout(panel_layout)
-        self.top_toolbox.addItem(panel_widget, "Measurement Tools")
+        panel_layout.addWidget(self.zoom_in)
+        panel_layout.addWidget(self.zoom_out)
 
         central_container = QWidget()
         layout = QVBoxLayout()
 
-        layout.addWidget(panel_widget)  # top toolbox
-        layout.addWidget(self.scroll_area)  # main content
+        self.addToolBar(panel_layout)
 
         central_container.setLayout(layout)
         self.setCentralWidget(central_container)
@@ -160,36 +174,110 @@ class MainWindow(QMainWindow):
         # self.setup_top_toolbox_panel()
 
         # Toolbox
-        self.toolbox = QToolBox()
-        self.toolbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.left_toolbox = QToolBox()
+        self.left_toolbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # Create control panels
-        # create_properties_panel(self)
-        self.record_button = self.create_properties_panel()
-        self.record_button.setText("Start Record")
+        self.right_toolbox = QToolBox()
+        self.right_toolbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.bottom_toolbox = QToolBox()
+        self.bottom_toolbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.left_bottom_toolbox = QToolBox()
+        self.left_bottom_toolbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.right_bottom_toolbox = QToolBox()
+        self.right_bottom_toolbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # TODO: camera controls panel
+        self.create_left_properties_panel()
+        self.create_right_properties_panel()
+        self.create_bottom_properties_panel()
+        self.create_left_bottom_properties_panel()
+
         histogram_panel(self)
-        self.toolbox.addItem(self.create_section("Advanced"), "Advanced")
 
         # Dock widget setup
-        dock_content = QWidget()
-        dock_layout = QVBoxLayout()
-        dock_layout.setContentsMargins(5, 5, 5, 5)
-        dock_layout.addWidget(self.toolbox)
-        dock_content.setLayout(dock_layout)
+        left_dock_content = QWidget()
+        right_dock_content = QWidget()
+        bottom_dock_content = QWidget()
+        right_bottom_dock_content = QWidget()
+        left_bottom_dock_content = QWidget()
 
-        self.dock = QDockWidget("Controls", self)
-        self.dock.setWidget(dock_content)
-        self.dock.setMinimumWidth(320)
-        self.dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        left_dock_layout = QVBoxLayout()
+        right_dock_layout = QVBoxLayout()
+        bottom_dock_layout = QHBoxLayout()
+        right_bottom_dock_layout = QVBoxLayout()
+        left_bottom_dock_layout = QVBoxLayout()
 
-        self.addDockWidget(Qt.RightDockWidgetArea, self.dock)
-        self.dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        left_dock_layout.setContentsMargins(1,1,1,1)
+        right_dock_layout.setContentsMargins(1,1,1,1)
+        bottom_dock_layout.setContentsMargins(1,1,1,1)
+        right_bottom_dock_layout.setContentsMargins(1,1,1,1)
+        left_bottom_dock_layout.setContentsMargins(1,1,1,1)
+
+        left_dock_layout.addWidget(self.left_toolbox)
+        right_dock_layout.addWidget(self.right_toolbox)
+        bottom_dock_layout.addWidget(self.bottom_toolbox)
+        right_bottom_dock_layout.addWidget(self.right_bottom_toolbox)
+        left_bottom_dock_layout.addWidget(self.left_bottom_toolbox)
+
+        left_dock_content.setLayout(left_dock_layout)
+        right_dock_content.setLayout(right_dock_layout)
+        bottom_dock_content.setLayout(bottom_dock_layout)
+        right_bottom_dock_content.setLayout(right_bottom_dock_layout)
+        left_bottom_dock_content.setLayout(left_bottom_dock_layout)
+
+        self.left_dock = QDockWidget("Device", self)
+        self.right_dock = QDockWidget("Properties", self)
+        self.bottom_dock = QDockWidget("Features Overview", self)
+
+        # self.right_bottom_dock = QDockWidget("Other Properties", self)
+        self.left_bottom_dock = QDockWidget("Advanced Properties", self)
+
+        self.left_dock.setWidget(left_dock_content)
+        self.right_dock.setWidget(right_dock_content)
+        self.bottom_dock.setWidget(bottom_dock_content)
+        # self.right_bottom_dock.setWidget(right_bottom_dock_content)
+        self.left_bottom_dock.setWidget(left_bottom_dock_content)
+
+        self.left_dock.setMaximumWidth(250)
+        self.right_dock.setMinimumWidth(350)
+        self.bottom_dock.setMinimumHeight(200)
+        # self.right_bottom_dock.setMinimumWidth(350)
+        self.left_bottom_dock.setMinimumWidth(250)
+
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.left_dock)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.right_dock)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.bottom_dock)
+        # self.addDockWidget(Qt.RightDockWidgetArea, self.right_bottom_dock)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.left_bottom_dock)
+
+        self.left_dock.setFeatures(QDockWidget.DockWidgetMovable)
+        self.right_dock.setFeatures(QDockWidget.DockWidgetMovable)
+        self.bottom_dock.setFeatures(QDockWidget.DockWidgetMovable)
+        # self.right_bottom_dock.setFeatures(QDockWidget.DockWidgetMovable)
+        self.left_bottom_dock.setFeatures(QDockWidget.DockWidgetMovable)
         # Disable controls initially
         self.toggle_controls(False)
 
+        layout.addWidget(self.scroll_area)  # main content
+
         self.showMaximized()
 
-        self.scroll_area.verticalScrollBar().valueChanged.connect(self.update_ruler_position)
+        # self.scroll_area.verticalScrollBar().valueChanged.connect(self.update_ruler_position)
+
+    def zoom_in_camera(self):
+        zoom_value = self.zoom_slider.value()
+        if zoom_value<100:
+            zoom_value += 10
+            self.zoom_slider.setValue(zoom_value)
+
+    def zoom_out_camera(self):
+        zoom_value = self.zoom_slider.value()
+        if zoom_value > 40:
+            zoom_value -= 10
+            self.zoom_slider.setValue(zoom_value)
 
     def update_histogram(self):
         """Update the histogram and display it in the toolbox (and bottom label if present)."""
@@ -200,7 +288,21 @@ class MainWindow(QMainWindow):
         cv_image = self.latest_frame.convertToFormat(QImage.Format_RGB888)
         ptr = cv_image.bits()
         ptr.setsize(cv_image.byteCount())
-        img = np.array(ptr, dtype=np.uint8).reshape(cv_image.height(), cv_image.width(), 3)
+
+        # Number of bytes per pixel in RGB888 format is 3 (1 byte for R, G, and B)
+        # The image width and height should be correct for reshaping into a 3D array (height, width, 3)
+        width = cv_image.width()
+        height = cv_image.height()
+
+        # Correct reshaping based on width and height (using 3 channels for RGB)
+        # img = np.array(ptr, dtype=np.uint8).reshape((height, width, 3))
+        bytes_per_line = cv_image.bytesPerLine()
+        # Convert buffer to 1D array
+        img_1d = np.frombuffer(ptr, dtype=np.uint8, count=bytes_per_line * height)
+        # Reshape to (height, bytes_per_line)
+        img_2d = img_1d.reshape((height, bytes_per_line))
+        # Slice to width pixels (width * 3 because RGB888)
+        img = img_2d[:, :width * 3].reshape((height, width, 3))
 
         # Draw hist image (H=200, W=256)
         H, W = 200, 256
@@ -240,27 +342,6 @@ class MainWindow(QMainWindow):
 
         self.fixed_ruler_label.move(0, scroll_pos)  # Keep the ruler aligned with the scroll
 
-    def setup_top_toolbox_panel(self):
-        """Setup the top QToolBox panel and toggle menu"""
-
-        # Create the toolbox widget
-        self.top_toolbox = QToolBox()
-        self.top_toolbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.top_toolbox.setMaximumHeight(150)
-        self.top_toolbox.setVisible(False)  # initially hidden
-
-        # Add sample section to the toolbox
-        panel_widget = QWidget()
-        panel_layout = QVBoxLayout()
-        panel_layout.addWidget(QLabel("This is a top toolbox section."))
-        panel_widget.setLayout(panel_layout)
-        self.top_toolbox.addItem(panel_widget, "Top Tool Panel")
-
-        # Add it above the scroll area in the layout
-        # self.central_label.insertWidget(0, self.top_toolbox)
-
-    def toggle_top_toolbox(self, checked):
-        self.top_toolbox.setVisible(checked)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -280,7 +361,7 @@ class MainWindow(QMainWindow):
     def on_zoom_percent_changed(self, value):
         if self.latest_frame:
             percent = value
-            scale_factor = percent / 100.0
+            scale_factor = percent / 10.0
             new_width = int(self.latest_frame.width() * scale_factor)
             new_height = int(self.latest_frame.height() * scale_factor)
             scaled_image = self.latest_frame.scaled(
@@ -330,13 +411,13 @@ class MainWindow(QMainWindow):
 
 
     def toggle_controls(self, enable: bool):
-        controls = [
-            self.slider, self.brightness_spinbox,
-            self.contrast_slider, self.contrast_spinbox,
-            self.exposure_slider, self.exposure_spinbox,
-            self.awb_checkbox, self.grayscale_checkbox,
-            self.zoom_slider, self.zoom_spinbox,
-            self.format_combo,
+        controls = [ # TODO: update these
+            # self.slider, self.brightness_spinbox,
+            # self.contrast_slider, self.contrast_spinbox,
+            # self.exposure_slider, self.exposure_spinbox,
+            # self.grayscale_checkbox,
+            # self.zoom_slider, self.zoom_spinbox,
+            # self.format_combo,
         ]
         for w in controls:
             w.setEnabled(enable)
@@ -438,21 +519,57 @@ class MainWindow(QMainWindow):
         self.angle_button.setChecked(False)
 
     def toggle_line_tool(self, checked):
-        self.central_label.enable_line_tool(checked)
+        if not self.camera_active:
+            self.line_button.setChecked(False)
+            return
+        if checked:
+            self.central_label.enable_line_tool(checked)
+            self.line_button.setIcon(QIcon("assets/line_active"))
+        else:
+            self.central_label.enable_line_tool(checked)
+            self.line_button.setIcon(QIcon("assets/line_inactive"))
+
+        self.circle_button.setIcon(QIcon("assets/circle_inactive"))
+        self.angle_button.setIcon(QIcon("assets/angle_inactive"))
         self.circle_button.setChecked(False)
         self.angle_button.setChecked(False)
         self.central_label.enable_circle_tool(False)
         self.central_label.enable_angle_tool(False)
 
     def toggle_circle_tool(self, checked):
-        self.central_label.enable_circle_tool(checked)
+        if not self.camera_active:
+            self.circle_button.setChecked(False)
+
+            return
+
+        if checked:
+            self.central_label.enable_circle_tool(checked)
+            self.circle_button.setIcon(QIcon("assets/circle_active"))
+        else:
+            self.central_label.enable_circle_tool(checked)
+            self.circle_button.setIcon(QIcon("assets/circle_inactive"))
+
+        self.line_button.setIcon(QIcon("assets/line_inactive"))
+        self.angle_button.setIcon(QIcon("assets/angle_inactive"))
         self.angle_button.setChecked(False)
         self.line_button.setChecked(False)
         self.central_label.enable_line_tool(False)
         self.central_label.enable_angle_tool(False)
 
     def toggle_angle_tool(self, checked):
-        self.central_label.enable_angle_tool(checked)
+        if not self.camera_active:
+            self.angle_button.setChecked(False)
+            return
+
+        if checked:
+            self.central_label.enable_angle_tool(checked)
+            self.angle_button.setIcon(QIcon("assets/angle_active"))
+        else:
+            self.central_label.enable_angle_tool(checked)
+            self.angle_button.setIcon(QIcon("assets/angle_inactive"))
+
+        self.line_button.setIcon(QIcon("assets/line_inactive"))
+        self.circle_button.setIcon(QIcon("assets/circle_inactive"))
         self.circle_button.setChecked(False)
         self.line_button.setChecked(False)
         self.central_label.enable_line_tool(False)
@@ -462,7 +579,7 @@ class MainWindow(QMainWindow):
         self.central_label.clear_rulers()
 
     def save_current_frame(self):
-        if self.latest_frame is None:
+        if self.latest_frame is None or self.camera_active==False:
             QMessageBox.warning(self, "Warning", "No frame to save!")
             return
 
@@ -473,7 +590,7 @@ class MainWindow(QMainWindow):
         # Generate file path
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
         file_format = self.format_combo.currentText().lower()
-        filename = f"measurement_overlay_{timestamp}.{file_format}"
+        filename = f"cryonano_{timestamp}.{file_format}"
         filepath = os.path.join(self.output_dir, filename)
 
         # Save the pixmap using Qt
@@ -495,7 +612,7 @@ class MainWindow(QMainWindow):
             self.camera.set_contrast(self.contrast_value)
             self.camera.set_exposure(self.exposure_value)
             self.camera.set_zoom(self.zoom_value)
-            self.camera.set_auto_awb(self.awb_checkbox.isChecked())
+            # self.camera.set_auto_awb(self.awb_checkbox.isChecked())
             self.camera.set_grayscale(self.grayscale_checkbox.isChecked())
             self.camera.start()
             self.camera_active = True
@@ -506,13 +623,16 @@ class MainWindow(QMainWindow):
             self.angle_button.setChecked(False)
             self.update_histogram()
             self.stack_layout.setCurrentWidget(self.central_label)
+            self.start_camera.setIcon(QIcon("assets/video_active.svg"))
             # self.start_recording()  # Start recording when camera starts
         else:
             self.stop_camera()
             self.central_label.clear()
             self.toggle_controls(False)
-            self.central_label.setText("Select Image or Open Camera")
-            self.stop_recording()  # Stop recording when camera stops
+            self.stack_layout.setCurrentWidget(self.logo_label)
+            self.start_camera.setIcon(QIcon("assets/video_inactive.svg"))
+            if self.recording:
+                self.stop_recording()  # Stop recording when camera stops
 
     def start_recording(self):
         if self.camera_active and not self.recording:
@@ -526,9 +646,12 @@ class MainWindow(QMainWindow):
             frame_height = int(self.latest_frame.height())
             self.video_writer = cv2.VideoWriter(filepath, fourcc, 30.0, (frame_width, frame_height))
             self.recording = True
+            # self.record_btn.setIcon(QIcon('assets/record_active.svg'))
+            self.stop_record_btn.setIcon('assets/record_stop_active.svg')
             print(f"Recording started: {filepath}")
             self.record_button.setText("Stop Record")
             self.record_button.setIcon(QIcon('assets/stop.png'))
+            self.record_btn.setText("Stop")
         elif self.recording:
             self.stop_recording()
             self.record_button.setText("Start Record")
@@ -542,6 +665,7 @@ class MainWindow(QMainWindow):
             self.video_writer = None
             self.recording = False
             print("Recording stopped.")
+            self.record_btn.setIcon(QIcon('assets/record_inactive.svg'))
             QMessageBox.information(self, "Success", f"Recording saved")
 
     def stop_camera(self):
@@ -637,9 +761,9 @@ class MainWindow(QMainWindow):
         self.exposure_value = 50
 
         # self.zoom_combo.setCurrentText("100%")
-        self.zoom_value = 10
+        self.zoom_value = 2
 
-        self.awb_checkbox.setChecked(True)
+        # self.awb_checkbox.setChecked(True)
         self.grayscale_checkbox.setChecked(False)
         self.format_combo.setCurrentText("PNG")
 
@@ -647,7 +771,7 @@ class MainWindow(QMainWindow):
         self.central_label.set_zoom_factor(1.0)
 
         self.toggle_ruler_from_menu(False)
-        self.toggle_top_toolbox(False)
+        # self.toggle_top_toolbox(False)
         self.line_button.setChecked(False)
         self.circle_button.setChecked(False)
         self.angle_button.setChecked(False)
@@ -675,24 +799,48 @@ class MainWindow(QMainWindow):
         # Update the ruler zoom factor (this will affect tick spacing)
         self.fixed_ruler_label.set_zoom_factor(scale)
 
-    def create_properties_panel(self):
-        """Create the main properties panel with camera controls"""
+    def set_camera_from_list(self, index):
+        if 0 <= index < len(self.available_cameras):
+            selected_camera_info = self.available_cameras[index]
+            # call your camera setup here
+            self.camera.set_camera(selected_camera_info)
+            print(index)
+
+    def create_left_properties_panel(self):
         properties_widget = QWidget()
         properties_layout = QVBoxLayout()
 
-        record_group = QGroupBox("Live Record")
-        record_layout = QVBoxLayout()
+        # 1. Get available cameras
+        self.available_cameras = QCameraInfo.availableCameras()
 
-        record_row = QHBoxLayout()
-        self.record_button = QPushButton("Start Record")
-        self.record_button.clicked.connect(self.start_recording)
+        # 2. Create a QListWidget instead of QComboBox
+        self.camera_list = QListWidget()
+        for camera in self.available_cameras:
+            self.camera_list.addItem(camera.description())
+            self.camera_list.addItem(camera.description())
 
-        self.snap_button = QPushButton("Snapshot")
-        self.snap_button.clicked.connect(self.save_current_frame)
+        # 3. Connect signal to handle selection changes
+        self.camera_list.currentRowChanged.connect(self.set_camera_from_list)
 
-        record_row.addWidget(self.record_button)
-        record_row.addWidget(self.snap_button)
-        record_layout.addLayout(record_row)
+        # 4. Wrap in a group box
+        camera_select_group = QGroupBox("Available Devices")
+        controls_layout = QVBoxLayout()
+        controls_layout.addWidget(self.camera_list)
+        # camera_group.setLayout(camera_layout)
+        camera_select_group.setLayout(controls_layout)
+
+        properties_layout.addWidget(camera_select_group)
+        # properties_layout.addWidget(camera_group)
+        properties_layout.addStretch()
+        properties_widget.setLayout(properties_layout)
+
+
+        self.left_toolbox.addItem(properties_widget, "Device Selection")
+
+    def create_right_properties_panel(self):
+        """Create the main properties panel with camera controls"""
+        properties_widget = QWidget()
+        properties_layout = QVBoxLayout()
 
         # Camera Controls Group
         camera_group = QGroupBox("Camera Controls")
@@ -706,28 +854,12 @@ class MainWindow(QMainWindow):
         self.slider.setValue(50)
         self.brightness_value = 50
         self.slider.valueChanged.connect(self.update_brightness)
-        self.slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                background: #4CAF50;  # Track color (green)
-                height: 6px;          # Height of the track
-                border-radius: 3px;   # Rounded corners for the track
-            }
-            QSlider::handle:horizontal {
-                background: #FF5733;  # Handle color (orange)
-                border: 2px solid #FF5733;  # Border around the handle
-                width: 12px;          # Handle width
-                height: 12px;         # Handle height
-                border-radius: 6px;   # Rounded handle
-            }
-            QSlider::sub-page:horizontal {
-                background: #76D7C4;  # Subtrack color (light green)
-                border-radius: 3px;
-            }
-            QSlider::add-page:horizontal {
-                background: #D3D3D3;  # Remaining track color (gray)
-                border-radius: 3px;
-            }
-        """)
+        # Create a slider
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(0, 100)
+        self.slider.setValue(50)
+        self.brightness_value = 50
+        self.slider.valueChanged.connect(self.update_brightness)
 
         self.brightness_spinbox = QSpinBox()
         self.brightness_spinbox.setRange(0, 100)
@@ -749,6 +881,8 @@ class MainWindow(QMainWindow):
         self.contrast_value = 50
         self.contrast_slider.valueChanged.connect(self.update_contrast)
 
+        self.contrast_slider.setStyleSheet(active_colors)
+
         self.contrast_spinbox = QSpinBox()
         self.contrast_spinbox.setRange(0, 100)
         self.contrast_spinbox.setValue(50)
@@ -769,6 +903,8 @@ class MainWindow(QMainWindow):
         self.exposure_value = 50
         self.exposure_slider.valueChanged.connect(self.update_exposure)
 
+        self.exposure_slider.setStyleSheet(active_colors)
+
         self.exposure_spinbox = QSpinBox()
         self.exposure_spinbox.setRange(0, 100)
         self.exposure_spinbox.setValue(50)
@@ -785,13 +921,13 @@ class MainWindow(QMainWindow):
         self.zoom_slider = QSlider(Qt.Horizontal)
         self.zoom_slider.setRange(25, 400)
         self.zoom_slider.setSingleStep(5)
-        self.zoom_slider.setValue(100)
+        self.zoom_slider.setValue(40)
 
         self.zoom_spinbox = QSpinBox()
         self.zoom_spinbox.setRange(25, 400)
         self.zoom_spinbox.setSingleStep(5)
         self.zoom_spinbox.setSuffix("%")
-        self.zoom_spinbox.setValue(100)
+        self.zoom_spinbox.setValue(40)
 
         # Connect them
         self.zoom_spinbox.valueChanged.connect(self.zoom_slider.setValue)
@@ -807,22 +943,15 @@ class MainWindow(QMainWindow):
         zoom_slider_row.addWidget(self.zoom_spinbox)
         zoom_row.addLayout(zoom_slider_row)
 
-        # Auto White Balance checkbox
-        awb_row = QVBoxLayout()
-        self.awb_checkbox = QCheckBox("Auto White Balance")
-        self.awb_checkbox.setChecked(True)
-        self.awb_checkbox.stateChanged.connect(self.update_awb_checkbox)
-        awb_row.addWidget(self.awb_checkbox)
+        self.slider.setStyleSheet(active_colors)
+        self.contrast_slider.setStyleSheet(active_colors)
+        self.exposure_slider.setStyleSheet(active_colors)
 
-        # Add all to camera layout
         camera_layout.addLayout(brightness_row)
         camera_layout.addLayout(contrast_row)
         camera_layout.addLayout(exposure_row)
-        camera_layout.addLayout(zoom_row)
-        camera_layout.addLayout(awb_row)
 
         camera_group.setLayout(camera_layout)
-        record_group.setLayout(record_layout)
 
         # Image Effects Group
         effects_group = QGroupBox("Image Effects")
@@ -837,14 +966,113 @@ class MainWindow(QMainWindow):
         self.format_combo.addItems(["PNG", "JPG"])
         self.format_combo.setMaximumWidth(60)
 
-        # Add all groups to properties layout
-        properties_layout.addWidget(record_group)
+        # 1. Get available cameras
+        self.available_cameras = QCameraInfo.availableCameras()
+
+        # 2. Create a QListWidget instead of QComboBox
+        self.camera_list = QListWidget()
+        for camera in self.available_cameras:
+            self.camera_list.addItem(camera.description())
+
+        # 3. Connect signal to handle selection changes
+        self.camera_list.currentRowChanged.connect(self.set_camera_from_list)
+
+        # 4. Wrap in a group box
+        camera_select_group = QGroupBox("Cameras")
+        controls_layout = QVBoxLayout()
+        controls_layout.addWidget(self.camera_list)
+        camera_select_group.setLayout(controls_layout)
+
         properties_layout.addWidget(camera_group)
         properties_layout.addWidget(effects_group)
-        # properties_layout.addWidget(actions_group)
         properties_layout.addStretch()
         properties_widget.setLayout(properties_layout)
 
-        self.toolbox.addItem(properties_widget, "Properties")
+        self.right_toolbox.addItem(properties_widget, "Image Properties")
 
-        return self.record_button
+    def create_bottom_properties_panel(self):
+        properties_widget = QWidget()
+        properties_layout = QVBoxLayout()
+
+        # 1. Get available cameras
+        self.available_cameras = QCameraInfo.availableCameras()
+
+        # 2. Create a QListWidget instead of QComboBox
+        self.camera_list = QListWidget()
+        for camera in self.available_cameras:
+            self.camera_list.addItem(camera.description())
+            self.camera_list.addItem(camera.description())
+
+        # 3. Connect signal to handle selection changes
+        self.camera_list.currentRowChanged.connect(self.set_camera_from_list)
+
+        # 4. Wrap in a group box
+        camera_select_group = QGroupBox("Feature Documentation")
+        controls_layout = QVBoxLayout()
+        controls_layout.addWidget(self.camera_list)
+        # camera_group.setLayout(camera_layout)
+        # camera_select_group.setLayout(controls_layout)
+
+        # properties_layout.addWidget(camera_select_group)
+        # properties_layout.addWidget(camera_group)
+        properties_layout.addStretch()
+        properties_widget.setLayout(properties_layout)
+
+        self.bottom_toolbox.addItem(properties_widget, "")
+
+    def create_left_bottom_properties_panel(self):
+        properties_widget = QWidget()
+        properties_layout = QVBoxLayout()
+
+        # Dummy Camera Properties
+        # Camera Resolution (Height x Width) - Dropdown (QComboBox)
+        resolution_label = QLabel("Camera Resolution (Height x Width):")
+        self.resolution_combobox = QComboBox()
+        # Add predefined resolutions to the combobox
+        self.resolution_combobox.addItem("1920 x 1080")  # Full HD
+        self.resolution_combobox.addItem("1280 x 720")  # HD
+        self.resolution_combobox.addItem("640 x 480")  # VGA
+        self.resolution_combobox.addItem("3840 x 2160")  # 4K
+        self.resolution_combobox.addItem("2560 x 1440")  # QHD
+
+        # Set default resolution
+        self.resolution_combobox.setCurrentText("1920 x 1080")
+
+        # Camera Gain
+        gain_label = QLabel("Gain:")
+        self.gain_spinbox = QSpinBox()
+        self.gain_spinbox.setRange(0, 100)  # Set a range for gain
+        self.gain_spinbox.setValue(50)  # Default gain value (editable)
+
+        # Camera Exposure Time (in milliseconds)
+        exposure_label = QLabel("Exposure Time (ms):")
+        self.exposure_spinbox = QSpinBox()
+        self.exposure_spinbox.setRange(0, 10000)  # Exposure time in milliseconds
+        self.exposure_spinbox.setValue(100)  # Default exposure time (editable)
+
+        # Camera ISO
+        iso_label = QLabel("ISO:")
+        self.iso_spinbox = QSpinBox()
+        self.iso_spinbox.setRange(100, 3200)  # ISO range
+        self.iso_spinbox.setValue(400)  # Default ISO value (editable)
+
+        # Add all properties to the layout
+        properties_layout.addWidget(resolution_label)
+        properties_layout.addWidget(self.resolution_combobox)
+        properties_layout.addWidget(gain_label)
+        properties_layout.addWidget(self.gain_spinbox)
+        properties_layout.addWidget(exposure_label)
+        properties_layout.addWidget(self.exposure_spinbox)
+        properties_layout.addWidget(iso_label)
+        properties_layout.addWidget(self.iso_spinbox)
+
+        # Add some space at the end
+        properties_layout.addStretch()
+
+        # Set the layout for the properties widget
+        properties_widget.setLayout(properties_layout)
+
+        # Add the properties widget to the left bottom toolbox
+        self.left_bottom_toolbox.addItem(properties_widget, "Device Properties")
+
+

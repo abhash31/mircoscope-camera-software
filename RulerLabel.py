@@ -197,8 +197,8 @@ class RulerLabel(QLabel):
             painter.drawLine(0, y, tick_len // 2, y)
 
     def draw_measurement_rulers(self, painter):
-        if not self.ruler_enabled:
-            return
+        # if not self.ruler_enabled:
+        #     return
 
         # Draw all lines
         for start, end in self.ruler_lines:

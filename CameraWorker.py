@@ -17,6 +17,7 @@ class CameraWorkerThread(QThread):
         self.auto_awb = True
         self.grayscale = False
         self.ThreadActive = False
+        self.camera_index = 0
 
     def run(self):
         self.ThreadActive = True
@@ -125,6 +126,10 @@ class CameraWorkerThread(QThread):
 
         # Clean up
         cap.release()
+
+    def set_camera(self, index):
+        self.camera_index = index
+        print(index)
 
     def stop(self):
         self.ThreadActive = False
