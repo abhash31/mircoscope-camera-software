@@ -1,0 +1,12 @@
+<svg width="400" height="200" viewBox="0 0 400 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Circles -->
+  <circle cx="70" cy="50" r="18" fill="#E51B23"/>
+  <circle cx="115" cy="50" r="18" fill="#B4B5B7"/>
+  <circle cx="160" cy="50" r="18" fill="#F8AE2D"/>
+
+  <!-- CRYONANO text -->
+  <text x="40" y="120" font-family="Arial" font-weight="bold" font-size="40" fill="#222">CRYONANO</text>
+
+  <!-- THINK SCIENCE text -->
+  <text x="55" y="155" font-family="Arial" font-size="21" fill="#222">THINK SCIENCE</text>
+</svg>
